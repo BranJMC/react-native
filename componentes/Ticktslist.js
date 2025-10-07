@@ -1,19 +1,34 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, Button, FlatList, StyleSheet, TouchableOpacity, Modal, TextInput, Alert, ScrollView } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
-import { logout } from './logout.js';
+import {
+  View,
+  Text,
+  Button,
+  FlatList,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  Alert,
+  Modal,
+  TextInput,
+  Dimensions
+} from 'react-native';
+
+const windowWidth = Dimensions.get('window').width;
 
 function escapeHtml(s) {
   if (!s) return '';
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-export default function TicketsList() {
+export default function TicketsList({ onVerTicket, onSalir, onVolverDashboard }) {
   const [tickets, setTickets] = useState([]);
-  const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ title: '', description: '', priority: 'medium' });
-  const navigation = useNavigation();
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingId, setEditingId] = useState(null);
+  const [form, setForm] = useState({
+    title: '',
+    description: '',
+    priority: 'medium'
+  });
 
   useEffect(() => {
     load();
@@ -29,57 +44,91 @@ export default function TicketsList() {
     setTickets(await res.json());
   }
 
-  function openModal(ticket) {
-    setModalOpen(true);
+  function openModal(ticket = null) {
     if (ticket) {
-      setEditing(ticket._id);
+      setEditingId(ticket._id);
       setForm({
         title: ticket.title || '',
         description: ticket.description || '',
         priority: ticket.priority || 'medium'
       });
     } else {
-      setEditing(null);
-      setForm({ title: '', description: '', priority: 'medium' });
+      setEditingId(null);
+      setForm({
+        title: '',
+        description: '',
+        priority: 'medium'
+      });
     }
+    setModalVisible(true);
   }
 
   function closeModal() {
-    setModalOpen(false);
-    setEditing(null);
-    setForm({ title: '', description: '', priority: 'medium' });
+    setModalVisible(false);
+    setEditingId(null);
+    setForm({
+      title: '',
+      description: '',
+      priority: 'medium'
+    });
   }
 
-  async function handleSubmit() {
+  async function handleSave() {
     const body = {
       title: form.title.trim(),
       description: form.description.trim(),
       priority: form.priority
     };
-    let resp;
-    if (editing) {
-      resp = await fetch(`http://localhost:3000/tickets/${editing}`, {
-        method: 'PUT',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
-    } else {
-      resp = await fetch('http://localhost:3000/tickets', {
-        method: 'POST',
-        credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
-      });
+    try {
+      let resp;
+      if (editingId) {
+        resp = await fetch(`http://localhost:3000/tickets/${editingId}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+      } else {
+        resp = await fetch('http://localhost:3000/tickets', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body)
+        });
+      }
+      const j = await resp.json().catch(() => ({ error: 'Error' }));
+      if (resp.ok) {
+        Alert.alert('Guardado correctamente');
+        closeModal();
+        load();
+      } else {
+        Alert.alert(j.error || 'Error al guardar');
+      }
+    } catch (err) {
+      Alert.alert('Error de conexión');
     }
-    const j = await resp.json().catch(() => ({ error: 'Error' }));
-    if (resp.ok) {
-      Alert.alert('Éxito', 'Guardado correctamente');
-      closeModal();
-      load();
-    } else {
-      Alert.alert('Error', j.error || 'Error al guardar');
-    }
+  }
+
+  async function handleDeleteFromModal() {
+    Alert.alert('Confirmar', '¿Eliminar ticket?', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar', style: 'destructive', onPress: async () => {
+          const resp = await fetch(`http://localhost:3000/tickets/${editingId}`, {
+            method: 'DELETE',
+            credentials: 'include'
+          });
+          const j = await resp.json().catch(() => ({ error: 'Error' }));
+          if (resp.ok) {
+            Alert.alert('Eliminado', j.message || 'Eliminado');
+            closeModal();
+            load();
+          } else {
+            Alert.alert('Error', j.error || 'No se pudo eliminar');
+          }
+        }
+      }
+    ]);
   }
 
   async function handleDelete(id) {
@@ -103,103 +152,113 @@ export default function TicketsList() {
     ]);
   }
 
-  const handleLogout = async () => {
-    await logout();
-    navigation.navigate('Login');
-  };
-
   return (
     <ScrollView contentContainerStyle={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Ticketrik</Text>
+        <Text style={styles.title}>🎫 Ticketrik</Text>
         <View style={styles.nav}>
-          <TouchableOpacity onPress={() => navigation.navigate('Dashboard')}>
-            <Text style={styles.link}>Dashboard</Text>
+          <TouchableOpacity style={styles.navBtn} onPress={onVolverDashboard}>
+            <Text style={styles.navBtnText}>Dashboard</Text>
           </TouchableOpacity>
-          <Button title="Cerrar sesión" onPress={handleLogout} />
+          <TouchableOpacity style={[styles.navBtn, styles.logoutBtn]} onPress={onSalir}>
+            <Text style={[styles.navBtnText, { color: '#fff' }]}>Cerrar sesión</Text>
+          </TouchableOpacity>
         </View>
       </View>
-      <Text style={styles.sectionTitle}>Tickets</Text>
-      <View style={styles.btnBox}>
-        <Button title="Nuevo ticket" onPress={() => openModal()} />
-      </View>
-      <FlatList
-        data={tickets}
-        keyExtractor={t => t._id}
-        ListEmptyComponent={<Text>No hay tickets.</Text>}
-        renderItem={({ item: t }) => {
-          const creator = (t.createdBy && t.createdBy.name) ? escapeHtml(t.createdBy.name) : (t.createdBy || 'n/a');
-          return (
-            <View style={styles.ticketItem}>
-              <Text style={styles.ticketTitle}>{escapeHtml(t.title)}</Text>
-              <Text>{escapeHtml(t.description).slice(0, 150)}{t.description && t.description.length > 150 ? '...' : ''}</Text>
-              <Text>
-                <Text style={styles.bold}>Prioridad:</Text> {t.priority} | <Text style={styles.bold}>Creado por:</Text> {creator}
-              </Text>
-              <View style={styles.actionsRow}>
-                <TouchableOpacity onPress={() => openModal(t)}>
-                  <Text style={styles.actionLink}>Editar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => handleDelete(t._id)}>
-                  <Text style={styles.actionLink}>Eliminar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity onPress={() => navigation.navigate('TicketDetail', { id: t._id })}>
-                  <Text style={styles.actionLink}>Ver</Text>
-                </TouchableOpacity>
+      <View style={styles.listBox}>
+        <Text style={styles.sectionTitle}>Tickets</Text>
+        <View style={{ marginBottom: 16 }}>
+          <Button title="Nuevo ticket" onPress={() => openModal()} />
+        </View>
+        <FlatList
+          data={tickets}
+          keyExtractor={t => t._id}
+          ListEmptyComponent={<Text style={styles.noTickets}>No hay tickets.</Text>}
+          renderItem={({ item: t }) => {
+            const creator = (t.createdBy && t.createdBy.name) ? escapeHtml(t.createdBy.name) : (t.createdBy || 'n/a');
+            return (
+              <View style={styles.ticketItem}>
+                <Text style={styles.ticketTitle}>{escapeHtml(t.title)}</Text>
+                <Text style={styles.ticketDetails}>
+                  <Text style={styles.ticketLabel}>Prioridad:</Text> {t.priority}{"   "}
+                  <Text style={styles.ticketLabel}>Estado:</Text> {t.status}
+                </Text>
+                <Text style={styles.ticketDetails}>
+                  <Text style={styles.ticketLabel}>Creado por:</Text> {creator}
+                </Text>
+                <View style={styles.actionsRow}>
+                  <TouchableOpacity onPress={() => onVerTicket(t._id)}>
+                    <Text style={styles.actionLink}>Ver</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => openModal(t)}>
+                    <Text style={styles.actionLink}>Editar</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={() => handleDelete(t._id)}>
+                    <Text style={styles.actionLink}>Eliminar</Text>
+                  </TouchableOpacity>
+                </View>
               </View>
-            </View>
-          );
-        }}
-      />
-
+            );
+          }}
+        />
+      </View>
       {/* Modal para crear/editar ticket */}
-      <Modal visible={modalOpen} animationType="slide" transparent>
+      <Modal
+        visible={modalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={closeModal}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modal}>
-            <Text style={styles.modalTitle}>{editing ? 'Editar ticket' : 'Crear ticket'}</Text>
-            <Text>Título:</Text>
+            <Text style={styles.modalTitle}>{editingId ? 'Editar ticket' : 'Crear ticket'}</Text>
             <TextInput
               style={styles.input}
+              placeholder="Título"
               value={form.title}
               onChangeText={text => setForm({ ...form, title: text })}
-              placeholder="Título"
             />
-            <Text>Descripción:</Text>
             <TextInput
-              style={[styles.input, styles.textarea]}
+              style={[styles.input, { height: 80 }]}
+              placeholder="Descripción"
               value={form.description}
               onChangeText={text => setForm({ ...form, description: text })}
-              placeholder="Descripción"
               multiline
             />
-            <Text>Prioridad:</Text>
-            <View style={styles.priorityRow}>
-              {['low', 'medium', 'high'].map(p => (
-                <TouchableOpacity
-                  key={p}
-                  style={[
-                    styles.priorityBtn,
-                    form.priority === p && styles.prioritySelected
-                  ]}
-                  onPress={() => setForm({ ...form, priority: p })}
-                >
-                  <Text>{p === 'low' ? 'Baja' : p === 'medium' ? 'Media' : 'Alta'}</Text>
-                </TouchableOpacity>
-              ))}
+            <View style={styles.pickerRow}>
+              <Text style={{ marginRight: 8 }}>Prioridad:</Text>
+              <TouchableOpacity
+                style={[styles.priorityBtn, form.priority === 'low' && styles.prioritySelected]}
+                onPress={() => setForm({ ...form, priority: 'low' })}
+              >
+                <Text>Baja</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.priorityBtn, form.priority === 'medium' && styles.prioritySelected]}
+                onPress={() => setForm({ ...form, priority: 'medium' })}
+              >
+                <Text>Media</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.priorityBtn, form.priority === 'high' && styles.prioritySelected]}
+                onPress={() => setForm({ ...form, priority: 'high' })}
+              >
+                <Text>Alta</Text>
+              </TouchableOpacity>
             </View>
             <View style={styles.modalButtons}>
-              <Button title="Guardar" onPress={handleSubmit} />
-              <Button title="Cancelar" color="#888" onPress={closeModal} />
+              <Button title="Guardar" onPress={handleSave} />
+              <Button title="Cancelar" color="#6c757d" onPress={closeModal} />
             </View>
-            {editing && (
+            {editingId ? (
               <View style={{ marginTop: 20 }}>
                 <Button
                   title="Eliminar Ticket"
                   color="#e74c3c"
-                  onPress={() => handleDelete(editing)}
+                  onPress={handleDeleteFromModal}
                 />
               </View>
-            )}
+            ) : null}
           </View>
         </View>
       </Modal>
@@ -208,25 +267,172 @@ export default function TicketsList() {
 }
 
 const styles = StyleSheet.create({
-  container: { padding: 16, backgroundColor: '#fff' },
-  header: { marginBottom: 16 },
-  title: { fontSize: 24, fontWeight: 'bold' },
-  nav: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  link: { color: 'blue', marginRight: 16 },
-  sectionTitle: { fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
-  btnBox: { marginBottom: 12 },
-  ticketItem: { marginBottom: 12, padding: 10, backgroundColor: '#e9e9e9', borderRadius: 6 },
-  ticketTitle: { fontWeight: 'bold', fontSize: 16 },
-  bold: { fontWeight: 'bold' },
-  actionsRow: { flexDirection: 'row', marginTop: 8, gap: 12 },
-  actionLink: { color: 'blue', marginRight: 16 },
-  modalOverlay: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: 'rgba(0,0,0,0.3)' },
-  modal: { width: '90%', backgroundColor: '#fff', borderRadius: 8, padding: 20 },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', marginBottom: 12 },
-  input: { borderWidth: 1, borderColor: '#ccc', borderRadius: 6, padding: 8, marginBottom: 10 },
-  textarea: { height: 80, textAlignVertical: 'top' },
-  priorityRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  priorityBtn: { padding: 8, borderRadius: 6, borderWidth: 1, borderColor: '#ccc', marginHorizontal: 4 },
-  prioritySelected: { backgroundColor: '#d0eaff', borderColor: '#007aff' },
-  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 10 },
+  container: {
+    padding: 0,
+    backgroundColor: '#f6f8fa',
+    minHeight: '100%',
+    alignItems: 'center'
+  },
+  header: {
+    width: '100%',
+    backgroundColor: '#007AFF',
+    paddingTop: 40,
+    paddingBottom: 24,
+    paddingHorizontal: 24,
+    borderBottomLeftRadius: 24,
+    borderBottomRightRadius: 24,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  title: {
+    fontSize: 28,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+    letterSpacing: 1,
+    marginBottom: 10,
+  },
+  nav: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 16,
+  },
+  navBtn: {
+    backgroundColor: '#fff',
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    borderRadius: 20,
+    marginHorizontal: 6,
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.10,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  navBtnText: {
+    color: '#007AFF',
+    fontWeight: 'bold',
+    fontSize: 15,
+  },
+  logoutBtn: {
+    backgroundColor: '#e74c3c',
+    shadowColor: '#e74c3c',
+  },
+  listBox: {
+    width: 360,
+    alignSelf: 'center',
+    marginBottom: 16,
+    padding: 18,
+    backgroundColor: '#fff',
+    borderRadius: 18,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.10,
+    shadowRadius: 8,
+    elevation: 4,
+    marginTop: 10,
+  },
+  sectionTitle: {
+    fontSize: 17,
+    fontWeight: 'bold',
+    marginTop: 8,
+    marginBottom: 10,
+    color: '#222',
+    textAlign: 'center'
+  },
+  ticketItem: {
+    marginBottom: 12,
+    padding: 14,
+    backgroundColor: '#f0f4ff',
+    borderRadius: 12,
+    shadowColor: '#007AFF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 4,
+    elevation: 2,
+    borderLeftWidth: 4,
+    borderLeftColor: '#007AFF'
+  },
+  ticketTitle: {
+    fontWeight: 'bold',
+    fontSize: 16,
+    color: '#222',
+    marginBottom: 2
+  },
+  ticketDetails: {
+    fontSize: 14,
+    color: '#444'
+  },
+  ticketLabel: {
+    fontWeight: 'bold',
+    color: '#007AFF'
+  },
+  actionsRow: {
+    flexDirection: 'row',
+    marginTop: 8,
+    gap: 12
+  },
+  actionLink: {
+    color: '#007AFF',
+    marginRight: 16,
+    fontWeight: 'bold'
+  },
+  noTickets: {
+    color: '#888',
+    fontStyle: 'italic',
+    textAlign: 'center',
+    marginTop: 8
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.4)',
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  modal: {
+    backgroundColor: '#fff',
+    padding: 24,
+    borderRadius: 12,
+    width: '90%',
+    maxWidth: 400
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center'
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 6,
+    padding: 8,
+    marginBottom: 10
+  },
+  pickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12
+  },
+  priorityBtn: {
+    padding: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#ccc',
+    marginHorizontal: 4
+  },
+  prioritySelected: {
+    backgroundColor: '#d0eaff',
+    borderColor: '#007aff'
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 10
+  }
 });
